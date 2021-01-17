@@ -12,6 +12,9 @@
 #include <string>
 #include <sstream>
 #include <map>
+#include <fcntl.h>
+#include <assert.h>
+#include "const.h"
 
 void run_target(const char* programname)
 {
@@ -32,33 +35,33 @@ void print_result(int icounter, const DISASM & disasm_info, int len, const long 
     std::cout << " " << disasm_info.CompleteInstr << std::endl;
 }
 
-void print_hexes(const std::vector<unsigned char> & hexes){
-    std::cout.fill('0');
-    for (int i = 0; i < hexes.size(); ++i){
-        std::cout.width(2);	
-		std::cout << std::hex << (short)hexes[i] << " ";
+void print_hexes(const std::vector<unsigned char> & hex1, 
+                 const std::vector<unsigned char> & hex2, 
+                 std::string filename){
+    std::ofstream of(filename);
+    of.fill('0');
+    for (int i = 0; i < hex1.size(); ++i){
+        of.width(2);	
+		of << std::hex << (short)hex1[i] << " " << (short)hex2[i] << std::endl;
     }
-    std::cout << std::endl;
+    of << std::endl;
+    of.close();
 }
 
-void print_hexes(const std::vector<unsigned long long> & hexes){
-    std::cout.fill('0');
-    for (int i = 0; i < hexes.size(); ++i){
-        std::cout.width(16);	
-		std::cout << std::hex << hexes[i] << " ";
+void print_hexes(const std::vector<unsigned long long> & hex1, 
+                 const std::vector<unsigned long long> & hex2, 
+                 std::string filename){
+    std::ofstream of(filename);
+    of.fill('0');
+    for (int i = 0; i < hex1.size(); ++i){
+        of.width(16);	
+		of << std::hex << hex1[i] << " " << hex2[i] << std::endl;
     }
-    std::cout << std::endl;
+    of << std::endl;
+    of.close();
 }
 
-void write_to_file(std::vector<std::pair<std::string, std::string> > & src, const char * filename){
-    std::ofstream ofs(filename);
-    for (std::vector<std::pair<std::string, std::string> >::iterator it = src.begin(); it != src.end(); ++it){
-        ofs << it->first << " :::::::::::: " << it->second << std::endl;
-    }
-    ofs.close();
-}
-
-void register_map(std::map<unsigned long long, unsigned long long> & registers, const struct user_regs_struct & regs){
+void register_map(std::map<Int64, unsigned long long> & registers, const struct user_regs_struct & regs){
     registers[REG0] = regs.rax;
     registers[REG1] = regs.rcx;
     registers[REG2] = regs.rdx;
@@ -77,6 +80,18 @@ void register_map(std::map<unsigned long long, unsigned long long> & registers, 
     registers[REG15] = regs.r15;
 }
 
+void write_to_file(std::vector<std::pair<std::string, OPTYPE> > & src, const char * filename){
+    std::ofstream ofs(filename);
+    for (std::vector<std::pair<std::string, OPTYPE> >::iterator it = src.begin(); it != src.end(); ++it){
+        ofs << it->first << " :::::::::::: " << it->second.OpMnemonic << ": " 
+        << it->second.Memory.BaseRegister << " "
+        << it->second.Memory.IndexRegister << " "
+        << it->second.Memory.Displacement << " "
+        << std::endl;
+    }
+    ofs.close();
+}
+
 void run_debugger(pid_t child_pid)
 {
     int wait_status;
@@ -88,7 +103,8 @@ void run_debugger(pid_t child_pid)
 
     std::vector<unsigned char> rip_storages;
     std::vector<unsigned long long> addr_storages;
-    // std::vector<std::pair<std::string, std::string> > op10000, op20000, op30000, op4040000, op4030000, op8040000;
+    std::vector<unsigned long long> value_storages;
+    std::vector<std::pair<std::string, OPTYPE> > op10000, op20000, op30000, op4040000, op4030000, op8040000;
     while(WIFSTOPPED(wait_status)) {
         icounter++;
         struct user_regs_struct regs;
@@ -144,25 +160,28 @@ void run_debugger(pid_t child_pid)
                 //std::cout << disasm_info.Instruction.Mnemonic << std::endl;
                 for (int i = 0; i < sizeof(operands) / sizeof(OPTYPE); ++i){
                     if (operands[i].OpSize > 0){
-                        // if (0x10000 == operands[i].OpType) op10000.push_back(std::pair<std::string, std::string>(disasm_info.CompleteInstr, operands[i].OpMnemonic));
-                        // else if (0x20000 == operands[i].OpType) op20000.push_back(std::pair<std::string, std::string>(disasm_info.CompleteInstr, operands[i].OpMnemonic));
-                        // else if (0x30000 == operands[i].OpType) op30000.push_back(std::pair<std::string, std::string>(disasm_info.CompleteInstr, operands[i].OpMnemonic));
-                        // else if (0x4040000 == operands[i].OpType) op4040000.push_back(std::pair<std::string, std::string>(disasm_info.CompleteInstr, operands[i].OpMnemonic));
-                        // else if (0x4030000 == operands[i].OpType) op4030000.push_back(std::pair<std::string, std::string>(disasm_info.CompleteInstr, operands[i].OpMnemonic));
-                        // else if (0x8040000 == operands[i].OpType) op8040000.push_back(std::pair<std::string, std::string>(disasm_info.CompleteInstr, operands[i].OpMnemonic));
-                        // else {
-                        //     std::cerr << "Invalid OpType : " << std::hex << operands[i].OpType << std::endl;
-                        //     exit(-1);
-                        // }
+                        if (0x10000 == operands[i].OpType) op10000.push_back(std::pair<std::string, OPTYPE>(disasm_info.CompleteInstr, operands[i]));
+                        else if (0x20000 == operands[i].OpType) op20000.push_back(std::pair<std::string, OPTYPE>(disasm_info.CompleteInstr, operands[i]));
+                        else if (0x30000 == operands[i].OpType) op30000.push_back(std::pair<std::string, OPTYPE>(disasm_info.CompleteInstr, operands[i]));
+                        else if (0x4040000 == operands[i].OpType) op4040000.push_back(std::pair<std::string, OPTYPE>(disasm_info.CompleteInstr, operands[i]));
+                        else if (0x4030000 == operands[i].OpType) op4030000.push_back(std::pair<std::string, OPTYPE>(disasm_info.CompleteInstr, operands[i]));
+                        else if (0x8040000 == operands[i].OpType) op8040000.push_back(std::pair<std::string, OPTYPE>(disasm_info.CompleteInstr, operands[i]));
+                        else {
+                            std::cerr << "Invalid OpType : " << std::hex << operands[i].OpType << std::endl;
+                            exit(-1);
+                        }
+
                         if (0x30000 == operands[i].OpType){
-                            std::map<unsigned long long, unsigned long long> registers;
+                            std::map<Int64, unsigned long long> registers;
                             register_map(registers, regs);
-                            unsigned long long base = registers[operands[i].Memory.BaseRegister];
-                            unsigned long long index = registers[operands[i].Memory.IndexRegister];
-                            unsigned long long scale = operands[i].Memory.Scale;
-                            unsigned long long displacement = registers[operands[i].Memory.Displacement];
+                            Int64 base = registers[operands[i].Memory.BaseRegister];
+                            Int64 index = registers[operands[i].Memory.IndexRegister];
+                            Int32 scale = operands[i].Memory.Scale;
+                            Int64 displacement = operands[i].Memory.Displacement;
                             unsigned long long result = base + index * scale + displacement;
+                            unsigned long long value = (int)ptrace(PTRACE_PEEKDATA, child_pid, result, 0);
                             addr_storages.push_back(result);
+                            value_storages.push_back(value);
                         }
                         else if (0x4030000 == operands[i].OpType) {
                             char copied_str[24];
@@ -171,12 +190,13 @@ void run_debugger(pid_t child_pid)
                             std::stringstream ss;
                             ss << std::hex << copied_str;
                             ss >> result;
+                            unsigned long long value = (int)ptrace(PTRACE_PEEKDATA, child_pid, result, 0);
                             addr_storages.push_back(result);
+                            value_storages.push_back(value);
                         }
                     }
                 }
-            }
-            
+            }            
         }
 
         /* Make the child execute another instruction */
@@ -188,15 +208,16 @@ void run_debugger(pid_t child_pid)
         wait(&wait_status);
     }
     // print_hexes(rip_storages);
-    std::cout << addr_storages.size() << std::endl;
-    print_hexes(addr_storages);
+    assert(value_storages.size() == addr_storages.size());
+    std::cout << std::dec << addr_storages.size() << std::endl;
+    print_hexes(addr_storages, value_storages, "result.txt");
 
-    // write_to_file(op10000, "10000.txt");
-    // write_to_file(op20000, "20000.txt");
-    // write_to_file(op30000, "30000.txt");
-    // write_to_file(op4040000, "4040000.txt");
-    // write_to_file(op4030000, "4030000.txt");
-    // write_to_file(op8040000, "8040000.txt");
+    write_to_file(op10000, "10000.txt");
+    write_to_file(op20000, "20000.txt");
+    write_to_file(op30000, "30000.txt");
+    write_to_file(op4040000, "4040000.txt");
+    write_to_file(op4030000, "4030000.txt");
+    write_to_file(op8040000, "8040000.txt");
 
     std::cout << std::dec << "the child executed " << icounter << " instructions" << std::endl;
 }
